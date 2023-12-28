@@ -1,121 +1,76 @@
-`include "APB_master.sv"
-`include "APB_slave.sv"
-module APB_master_tb;
+module apb_slave
+#(parameter number_in_group_ADDR = 4'h0, // адрес регистра, где хранится номер студента в группе
+parameter data_ADDR = 4'h4,       // адрес регистра, где хранится дата дд.мм.гг
+parameter surname_ADDR = 4'h8,      // адрес регистра, где хранится первые 4 буквы фамилии
+parameter name_ADDDR = 4'hC)       // адрес регистра, где хранится первые 4 буквы имени
 
-
-
-reg PCLK = 0;                   // сигнал синхронизации
-reg PWRITE_MASTER = 0;          // сигнал, выбирающий режим записи или чтения (1 - запись, 0 - чтение)
-wire PSEL;                      // сигнал выбора переферии 
-reg [31:0] PADDR_MASTER = 0;    // Адрес регистра
-reg [31:0] PWDATA_MASTER = 0;   // Данные для записи в регистр
-wire [31:0] PRDATA_MASTER;       // Данные, прочитанные из слейва
-wire PENABLE;                    // сигнал разрешения, формирующийся в мастер APB
-reg PRESET = 0;                   // сигнал сброса
-wire PREADY;                      // сигнал готовности (флаг того, что всё сделано успешно)
-wire [31:0] PADDR;                // адрес, который мы будем передавать в слейв
-wire [31:0] PWDATA;               // данные, которые будут передаваться в слейв,
-wire [31:0] PRDATA ;              // данные, прочтённые с слейва
-wire PWRITE;                      // сигнал записи или чтения на вход слейва
-// объявления экземпляра модуля 
-APB_master APB_master_1 (
-    .PCLK(PCLK),
-    .PWRITE_MASTER(PWRITE_MASTER),
-    .PSEL(PSEL),
-    .PADDR_MASTER(PADDR_MASTER),
-    .PWDATA_MASTER(PWDATA_MASTER),
-    .PRDATA_MASTER(PRDATA_MASTER),
-    .PENABLE(PENABLE),
-    .PRESET(PRESET),
-    .PREADY(PREADY),
-    .PADDR(PADDR),
-    .PWDATA(PWDATA),
-    .PRDATA(PRDATA),
-    .PWRITE(PWRITE)
-);
-
-APB_slave APB_slave_1 (
-    .PWRITE(PWRITE),
-    .PSEL(PSEL),
-    .PADDR(PADDR),
-    .PWDATA(PWDATA),
-    .PRDATA(PRDATA),
-    .PENABLE(PENABLE),
-    .PREADY(PREADY),
-    .PCLK(PCLK)
+(
+  input wire PWRITE,      // сигнал, выбирающий режим записи или чтения (1 - запись, 0 - чтение)
+  input wire PCLK,       // сигнал синхронизации
+  input wire PSEL,       // сигнал выбора переферии 
+  input wire [31:0] PADDR,   // Адрес регистра
+  input wire [31:0] PWDATA,   // Данные для записи в регистр
+  output reg [31:0] PRDATA = 0,   // Данные, прочитанные из регистра
+  input wire PENABLE,      // сигнал разрешения
+  output reg PREADY = 0       // сигнал готовности (флаг того, что всё сделано успешно)
 );
 
 
+//Регистры для записи значений
+reg [31:0] number_in_group = 0;
+reg [31:0] data = 0;
+reg [31:0] surname = 0;
+reg [31:0] name = 0;
 
-always #200 PCLK = ~PCLK; // генерация входного сигнала Pclk
+// циклы записи и чтения интерфейса APB
 
-initial begin
-//ЗАПИСЬ
-PCLK = 0;
-PWRITE_MASTER = 1;         // выбираем запись
-PWDATA_MASTER = 23;         // в данные для записи записываем 21
-PADDR_MASTER = 0;           // выбираем адрес регистра number_in_group
-@(posedge PCLK);
-@(posedge PCLK);
+always @(posedge PSEL or posedge PCLK) 
+begin
+  
+  if (PSEL && !PWRITE && PENABLE) // Чтение из регистров 
+  begin
+    case(PADDR)
+    number_in_group_ADDR: PRDATA <= number_in_group;
+    data_ADDR:            PRDATA <= data;
+    surname_ADDR:         PRDATA <= surname;
+    name_ADDDR :          PRDATA <= name;
+    endcase
+    PREADY <= 1'd1;      // поднимаем флаг заверешения операции
+  end
 
-PWRITE_MASTER = 1;         // выбираем запись
-PWDATA_MASTER = 32'h20122023; // в данные для записи записываем 20.12.2023
-PADDR_MASTER = 4;           // выбираем адрес регистра date
-@(posedge PCLK);
-@(posedge PCLK);
+  
+  else if (PSEL && PWRITE && PENABLE) // Запись в регистры
+  begin
+    case(PADDR)
+    number_in_group_ADDR: number_in_group <= PWDATA; // запись по адресу регистра номера человека в группе
+    data_ADDR: data <= PWDATA;      // запись по адресу регистра даты
+    surname_ADDR: surname <= PWDATA;     // запись по адресу регистра фамилии
+    name_ADDDR : name <= PWDATA;      // запись по адресу регистра имени
+    endcase
+    PREADY <= 1'd1;  // поднимаем флаг заверешения операции
+  end
 
-PWRITE_MASTER = 1;         // выбираем запись
-PWDATA_MASTER = 32'h98A0A1A0; // в данные для записи записываем первые 4 буквы фамилии в аски коде
-PADDR_MASTER = 8;           // выбираем адрес регистра surname
-@(posedge PCLK);
-@(posedge PCLK);
+ 
+ if (PREADY) // сбрасываем PREADY после выполнения записи или чтения
+  begin
+   $display();
+   $display("Operation: %b", PWRITE);
+   $display("Address: %h", PADDR);
 
-PWRITE_MASTER = 1;            // выбираем запись
-PWDATA_MASTER = 32'h85AAA0E2;  // в данные для записи записываем первые 4 буквы имени в аски коде
-PADDR_MASTER = 4'hC;           // выбираем адрес регистра name
-@(posedge PCLK);
-@(posedge PCLK);
+   if(PWRITE)
+   begin
+    $display("Data for recording: %h", PWDATA);
+   end
 
+   else if(!PWRITE)
+   begin
+    $display("Read data: %h", PRDATA);
+   end
 
-//ЧТЕНИЕ
-PWRITE_MASTER = 0;            // выбираем чтение
-PADDR_MASTER = 0;           // выбираем адрес регистра номера в группе
-@(posedge PCLK);
-@(posedge PCLK);
+   PREADY <= !PREADY;
+  end
 
-
-PWRITE_MASTER = 0;            // выбираем чтение
-PADDR_MASTER = 4;          // выбираем адрес регистра date
-@(posedge PCLK);
-@(posedge PCLK);
-
-PWRITE_MASTER = 0;            // выбираем чтение
-PADDR_MASTER = 8;            // выбираем адрес регистра surname
-@(posedge PCLK);
-@(posedge PCLK);
-
-PWRITE_MASTER = 0;            // выбираем чтение
-PADDR_MASTER = 4'hC;           // выбираем адрес регистра name
-@(posedge PCLK);
-@(posedge PCLK);
-
-
-
-
- #500 $finish; // Заканчиваем симуляцию
-end
-
-
-
-
-
-
-
-initial begin
-$dumpfile("APB_master.vcd"); // создание файла для сохранения результатов симуляции
-$dumpvars(0, APB_master_tb); // установка переменных для сохранения в файле
-$dumpvars;
-end
-
+ 
+ end
 
 endmodule
